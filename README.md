@@ -426,7 +426,12 @@ Path validity: yes
 CLI 另外对校园144对连续查询，检查所有结果一致；还覆盖两种参数顺序、非法参数、缺失/不完整坐标、无坐标时默认Dijkstra、可执行文件旁查找数据、路径空格和旧菜单回归。
 
 GitHub Actions 配置位于 `.github/workflows/tests.yml`，工作流名 **Campus Route Planner tests**，推送及 PR 会分别在 `ubuntu-latest`、`windows-latest` 上严格构建并运行 CTest。
-**远程 CI 尚未确认**：此处只记录上述本地验证，不能视为 Linux 或 GitHub Actions 已通过。发布后以最新提交的两个远程任务真实结果为准。
+GitHub Actions 已在提交 `32b27f8` 上通过验证：
+`ubuntu-latest / Debug` 和 `windows-latest / Debug` 两个任务均成功。
+
+[查看本次 CI 运行记录](https://github.com/18175005953wyh-ctrl/campus-route-planner/actions/runs/38137411980)
+
+此结果对应上述提交；后续修改以最新提交的 CI 检查结果为准。
 
 ### Limitations
 
