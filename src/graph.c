@@ -41,6 +41,7 @@ int graph_add_location(Graph *graph, int id, const char *name, const char *type)
         find_location_index_by_id(graph, id) >= 0 || !valid_label(name) || !valid_label(type)) return 0;
     location = &graph->locations[graph->count++];
     location->id = id;
+    location->x = location->y = location->has_coordinates = 0;
     memcpy(location->name, name, strlen(name) + 1);
     memcpy(location->type, type, strlen(type) + 1);
     return 1;
@@ -83,7 +84,8 @@ static void warn_row(const char *filename, unsigned long line, const char *reaso
     fprintf(stderr, "Warning: %s line %lu: %s\n", filename, line, reason);
 }
 
-static int load_csv(Graph *graph, const char *filename, int roads)
+/* kind: 0 = locations, 1 = roads, 2 = optional coordinates. */
+static int load_csv(Graph *graph, const char *filename, int kind)
 {
     FILE *file = fopen(filename, "r");
     char buffer[512];
@@ -105,7 +107,22 @@ static int load_csv(Graph *graph, const char *filename, int roads)
             warn_row(filename, row, "invalid CSV fields or ID; skipped.");
             continue;
         }
-        if (!roads) {
+        if (kind == 2) {
+            from = find_location_index_by_id(graph, first);
+            if (from < 0) { warn_row(filename, row, "unknown coordinate ID; skipped."); continue; }
+            if (graph->locations[from].has_coordinates) {
+                warn_row(filename, row, "duplicate coordinate ID; keeping first coordinates.");
+                continue;
+            }
+            if (!parse_integer(fields[1], -COORDINATE_LIMIT, COORDINATE_LIMIT, &second) ||
+                !parse_integer(fields[2], -COORDINATE_LIMIT, COORDINATE_LIMIT, &distance)) {
+                warn_row(filename, row, "invalid coordinate integer/range; skipped.");
+                continue;
+            }
+            graph->locations[from].x = second;
+            graph->locations[from].y = distance;
+            graph->locations[from].has_coordinates = 1;
+        } else if (kind == 0) {
             if (graph->count == MAX_LOCATIONS) warn_row(filename, row, "location limit (50); skipped.");
             else if (find_location_index_by_id(graph, first) >= 0) warn_row(filename, row, "duplicate location ID; skipped.");
             else if (!graph_add_location(graph, first, fields[1], fields[2])) warn_row(filename, row, "invalid name/type (1-63 bytes); skipped.");
@@ -134,6 +151,16 @@ static int load_csv(Graph *graph, const char *filename, int roads)
 
 int load_locations(Graph *graph, const char *filename) { return load_csv(graph, filename, 0); }
 int load_roads(Graph *graph, const char *filename) { return load_csv(graph, filename, 1); }
+int load_coordinates(Graph *graph, const char *filename) { return load_csv(graph, filename, 2); }
+
+int graph_has_complete_coordinates(const Graph *graph)
+{
+    int i;
+    if (graph == NULL || graph->count < 0 || graph->count > MAX_LOCATIONS) return 0;
+    for (i = 0; i < graph->count; ++i)
+        if (!graph->locations[i].has_coordinates) return 0;
+    return 1;
+}
 
 static void print_header(void)
 {
