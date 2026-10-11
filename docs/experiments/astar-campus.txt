@@ -1,0 +1,85 @@
+Loaded 12 locations.
+
+===== Campus Route Planner =====
+1. List all locations
+2. Show direct roads
+3. Find shortest route
+4. Search location
+5. Show map summary
+0. Exit
+Select an option: Start location ID: Destination location ID:
+Algorithm comparison
+Dijkstra route:
+Shortest route:
+Main Gate -> Central Square -> Library
+
+Total distance: 380 m
+Dijkstra: distance=380 m, expanded=6, relaxed=11
+A* route:
+Shortest route:
+Main Gate -> Central Square -> Library
+
+Total distance: 380 m
+A*: distance=380 m, expanded=4, relaxed=9
+Heuristic scale: 0.459619407771
+Distance agreement: yes
+Path validity: yes
+
+===== Campus Route Planner =====
+1. List all locations
+2. Show direct roads
+3. Find shortest route
+4. Search location
+5. Show map summary
+0. Exit
+Select an option: Start location ID: Destination location ID:
+Algorithm comparison
+Dijkstra route:
+Shortest route:
+Main Gate -> Central Square -> Cafeteria -> Sports Field
+
+Total distance: 600 m
+Dijkstra: distance=600 m, expanded=12, relaxed=13
+A* route:
+Shortest route:
+Main Gate -> Central Square -> Cafeteria -> Sports Field
+
+Total distance: 600 m
+A*: distance=600 m, expanded=9, relaxed=12
+Heuristic scale: 0.459619407771
+Distance agreement: yes
+Path validity: yes
+
+===== Campus Route Planner =====
+1. List all locations
+2. Show direct roads
+3. Find shortest route
+4. Search location
+5. Show map summary
+0. Exit
+Select an option: Start location ID: Destination location ID:
+Algorithm comparison
+Dijkstra route:
+Shortest route:
+Laboratory -> Administration Building -> Bus Stop
+
+Total distance: 350 m
+Dijkstra: distance=350 m, expanded=5, relaxed=7
+A* route:
+Shortest route:
+Laboratory -> Administration Building -> Bus Stop
+
+Total distance: 350 m
+A*: distance=350 m, expanded=4, relaxed=5
+Heuristic scale: 0.459619407771
+Distance agreement: yes
+Path validity: yes
+
+===== Campus Route Planner =====
+1. List all locations
+2. Show direct roads
+3. Find shortest route
+4. Search location
+5. Show map summary
+0. Exit
+Select an option: Goodbye.
