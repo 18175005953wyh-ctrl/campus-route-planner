@@ -1,7 +1,9 @@
 #include "graph.h"
+#include "geometry.h"
 #include "input.h"
 #include "pathfinder.h"
 #include <limits.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 
@@ -378,6 +380,11 @@ static int test_reference_all_pairs(void)
     PathResult result;
     graph_init(&graph);
     for (i = 0; i < 8; ++i) REQUIRE(graph_add_location(&graph, i + 10, "Place", "Type"));
+    for (i = 0; i < 8; ++i) {
+        graph.locations[i].x = i * 31;
+        graph.locations[i].y = (i % 3) * -47;
+        graph.locations[i].has_coordinates = 1;
+    }
     for (i = 0; i < 7; ++i)
         for (j = i + 1; j < 7; ++j)
             if ((i + j) % 3 != 0) REQUIRE(graph_add_road(&graph, i + 10, j + 10, (i * 17 + j * 11) % 40 + 1));
@@ -391,7 +398,396 @@ static int test_reference_all_pairs(void)
         REQUIRE(result.distance == reference[i][j]);
         if (reference[i][j] < INF_DISTANCE) REQUIRE(valid_path(&graph, result, i, j));
         else REQUIRE(!result.found);
+        result = astar_shortest_path(&graph, i, j);
+        REQUIRE(result.distance == reference[i][j]);
+        if (reference[i][j] < INF_DISTANCE) REQUIRE(valid_path(&graph, result, i, j));
+        else REQUIRE(!result.found);
     }
+    return 1;
+}
+
+static int load_coordinate_fixture(Graph *graph)
+{
+    char path[1024];
+    if (!load_fixture(graph, "test_roads.csv")) return 0;
+    if (snprintf(path, sizeof path, "%s/test_coordinates.csv", fixtures) >= (int)sizeof path) return 0;
+    return load_coordinates(graph, path);
+}
+
+static int test_coordinates(void)
+{
+    Graph graph;
+    REQUIRE(load_coordinate_fixture(&graph));
+    REQUIRE(graph_has_complete_coordinates(&graph));
+    REQUIRE(graph.locations[1].x == 30 && graph.locations[1].y == 40);
+    return 1;
+}
+
+static int test_negative_coordinates(void)
+{
+    Graph graph;
+    REQUIRE(load_coordinate_fixture(&graph));
+    REQUIRE(graph.locations[4].x == -100 && graph.locations[4].y == -200);
+    return 1;
+}
+
+static int test_unknown_coordinate(void)
+{
+    Graph graph;
+    REQUIRE(load_fixture(&graph, NULL));
+    REQUIRE(write_fixture("999,2,3\n10,4,5\n"));
+    REQUIRE(load_coordinates(&graph, "route-test-generated.csv"));
+    REQUIRE(graph.count == 5 && graph.locations[0].x == 4);
+    REQUIRE(!graph.locations[1].has_coordinates);
+    return 1;
+}
+
+static int test_duplicate_coordinate(void)
+{
+    Graph graph;
+    REQUIRE(load_fixture(&graph, NULL));
+    REQUIRE(write_fixture("10,2,3\n10,9,9\n"));
+    REQUIRE(load_coordinates(&graph, "route-test-generated.csv"));
+    REQUIRE(graph.locations[0].x == 2 && graph.locations[0].y == 3);
+    return 1;
+}
+
+static int test_coordinate_fields(void)
+{
+    Graph graph;
+    REQUIRE(load_fixture(&graph, NULL));
+    REQUIRE(write_fixture("10,2\n20,2,3,4\n30,,4\n40,1,\n50,1,2\n"));
+    REQUIRE(load_coordinates(&graph, "route-test-generated.csv"));
+    REQUIRE(!graph.locations[0].has_coordinates && !graph.locations[1].has_coordinates);
+    REQUIRE(!graph.locations[2].has_coordinates && !graph.locations[3].has_coordinates);
+    REQUIRE(graph.locations[4].has_coordinates);
+    return 1;
+}
+
+static int test_coordinate_range(void)
+{
+    Graph graph;
+    REQUIRE(load_fixture(&graph, NULL));
+    REQUIRE(write_fixture("10,1.5,2\n20,1000001,0\n30,0,-1000001\n40,99999999999999999999999,0\n50,0,NaN\n"));
+    REQUIRE(load_coordinates(&graph, "route-test-generated.csv"));
+    for (int i = 0; i < graph.count; ++i) REQUIRE(!graph.locations[i].has_coordinates);
+    REQUIRE(write_fixture("10,-1000000,1000000\n"));
+    REQUIRE(load_coordinates(&graph, "route-test-generated.csv"));
+    REQUIRE(graph.locations[0].x == -COORDINATE_LIMIT && graph.locations[0].y == COORDINATE_LIMIT);
+    return 1;
+}
+
+static int test_coordinate_bom(void)
+{
+    Graph graph;
+    REQUIRE(load_fixture(&graph, NULL));
+    REQUIRE(write_fixture("\xEF\xBB\xBF" " 10 , -2 , +3 \n\n20,0,0"));
+    REQUIRE(load_coordinates(&graph, "route-test-generated.csv"));
+    REQUIRE(graph.locations[0].x == -2 && graph.locations[0].y == 3 && graph.locations[1].has_coordinates);
+    return 1;
+}
+
+static int test_missing_coordinates(void)
+{
+    Graph graph;
+    REQUIRE(load_fixture(&graph, "test_roads.csv"));
+    REQUIRE(!graph_has_complete_coordinates(&graph));
+    REQUIRE(!load_coordinates(&graph, "route-test-missing-dir/coordinates.csv"));
+    REQUIRE(!astar_shortest_path(&graph, 0, 1).found);
+    REQUIRE(dijkstra_shortest_path(&graph, 0, 1).distance == 5);
+    return 1;
+}
+
+static int test_euclidean(void)
+{
+    Location a = {0}, b = {0};
+    b.x = 3; b.y = 4;
+    REQUIRE(euclidean_distance(&a, &b) == 5.0);
+    a.x = a.y = -COORDINATE_LIMIT;
+    b.x = b.y = COORDINATE_LIMIT;
+    REQUIRE(fabs(euclidean_distance(&a, &b) - hypot(2000000.0, 2000000.0)) < 1e-8);
+    return 1;
+}
+
+static int test_heuristic_goal(void)
+{
+    Graph graph;
+    double h[MAX_LOCATIONS];
+    REQUIRE(load_coordinate_fixture(&graph));
+    REQUIRE(build_goal_heuristic(&graph, 3, h) > 0.0);
+    REQUIRE(h[3] == 0.0);
+    for (int i = 0; i < graph.count; ++i) REQUIRE(h[i] >= 0.0);
+    return 1;
+}
+
+static int test_scaled_edges(void)
+{
+    Graph graph;
+    double alpha, h[MAX_LOCATIONS];
+    REQUIRE(load_coordinate_fixture(&graph));
+    alpha = graph_heuristic_scale(&graph);
+    REQUIRE(fabs(alpha - 0.1) < 1e-12);
+    for (int goal = 0; goal < graph.count; ++goal) {
+        REQUIRE(build_goal_heuristic(&graph, goal, h) > 0.0);
+        for (int i = 0; i < graph.count; ++i) for (int j = 0; j < graph.count; ++j) {
+            int weight = graph.adjacency[i][j];
+            if (weight < INF_DISTANCE) {
+                REQUIRE(alpha * euclidean_distance(&graph.locations[i], &graph.locations[j]) <= weight + 1e-12);
+                REQUIRE(h[i] <= weight + h[j]);
+            }
+        }
+    }
+    return 1;
+}
+
+static int test_zero_scale(void)
+{
+    Graph graph;
+    PathResult a, d;
+    REQUIRE(load_coordinate_fixture(&graph));
+    for (int i = 0; i < graph.count; ++i) graph.locations[i].x = graph.locations[i].y = 0;
+    a = astar_shortest_path(&graph, 0, 3); d = dijkstra_shortest_path(&graph, 0, 3);
+    REQUIRE(a.heuristic_scale == 0.0 && path_results_agree(&graph, &a, &d, 0, 3));
+    REQUIRE(a.expanded_nodes == d.expanded_nodes && a.relaxed_edges == d.relaxed_edges);
+    REQUIRE(memcmp(a.path, d.path, sizeof a.path) == 0);
+    return 1;
+}
+
+static int test_astar_direct(void)
+{
+    Graph graph;
+    PathResult result;
+    REQUIRE(load_coordinate_fixture(&graph));
+    result = astar_shortest_path(&graph, 0, 1);
+    REQUIRE(result.distance == 5 && result.path_length == 2);
+    REQUIRE(valid_path(&graph, result, 0, 1));
+    return 1;
+}
+
+static int test_astar_multistep(void)
+{
+    Graph graph;
+    PathResult result;
+    REQUIRE(load_coordinate_fixture(&graph));
+    result = astar_shortest_path(&graph, 0, 3);
+    REQUIRE(result.distance == 15 && result.path_length == 4);
+    REQUIRE(valid_path(&graph, result, 0, 3));
+    return 1;
+}
+
+static int test_astar_same(void)
+{
+    Graph graph;
+    PathResult result;
+    REQUIRE(load_coordinate_fixture(&graph));
+    result = astar_shortest_path(&graph, 4, 4);
+    REQUIRE(result.found && result.distance == 0 && result.path_length == 1 && result.path[0] == 4);
+    REQUIRE(result.expanded_nodes == 1 && result.relaxed_edges == 0);
+    return 1;
+}
+
+static int test_astar_unreachable(void)
+{
+    Graph graph;
+    PathResult a, d;
+    REQUIRE(load_coordinate_fixture(&graph));
+    a = astar_shortest_path(&graph, 0, 4); d = dijkstra_shortest_path(&graph, 0, 4);
+    REQUIRE(!a.found && a.distance == INF_DISTANCE && a.path_length == 0);
+    REQUIRE(a.expanded_nodes == 4 && path_results_agree(&graph, &a, &d, 0, 4));
+    REQUIRE(!astar_shortest_path(&graph, 4, 0).found);
+    return 1;
+}
+
+static int test_astar_invalid(void)
+{
+    Graph graph;
+    REQUIRE(load_coordinate_fixture(&graph));
+    REQUIRE(!astar_shortest_path(&graph, -1, 0).found);
+    REQUIRE(!astar_shortest_path(&graph, 0, graph.count).found);
+    REQUIRE(!astar_shortest_path(NULL, 0, 0).found);
+    REQUIRE(!dijkstra_shortest_path(NULL, 0, 0).found);
+    graph_init(&graph);
+    REQUIRE(!astar_shortest_path(&graph, 0, 0).found);
+    return 1;
+}
+
+static int test_search_metrics(void)
+{
+    Graph graph;
+    PathResult d, a;
+    graph_init(&graph);
+    for (int i = 1; i <= 3; ++i) REQUIRE(graph_add_location(&graph, i, "Node", "Type"));
+    REQUIRE(graph_add_road(&graph, 1, 2, 2));
+    REQUIRE(graph_add_road(&graph, 1, 3, 9));
+    REQUIRE(graph_add_road(&graph, 2, 3, 3));
+    for (int i = 0; i < 3; ++i) graph.locations[i].has_coordinates = 1;
+    d = dijkstra_shortest_path(&graph, 0, 2); a = astar_shortest_path(&graph, 0, 2);
+    REQUIRE(d.expanded_nodes == 3 && d.relaxed_edges == 3);
+    REQUIRE(a.expanded_nodes == 3 && a.relaxed_edges == 3 && a.distance == 5);
+    return 1;
+}
+
+static int test_decoy(void)
+{
+    Graph graph;
+    char path[1024];
+    PathResult d, a;
+    graph_init(&graph);
+    (void)snprintf(path, sizeof path, "%s/astar_decoy_locations.csv", fixtures);
+    REQUIRE(load_locations(&graph, path));
+    (void)snprintf(path, sizeof path, "%s/astar_decoy_roads.csv", fixtures);
+    REQUIRE(load_roads(&graph, path));
+    (void)snprintf(path, sizeof path, "%s/astar_decoy_coordinates.csv", fixtures);
+    REQUIRE(load_coordinates(&graph, path));
+    d = dijkstra_shortest_path(&graph, 0, 2); a = astar_shortest_path(&graph, 0, 2);
+    REQUIRE(path_results_agree(&graph, &d, &a, 0, 2) && a.distance == 20);
+    REQUIRE(valid_path(&graph, a, 0, 2) && valid_path(&graph, d, 0, 2));
+    REQUIRE(a.expanded_nodes < d.expanded_nodes);
+    return 1;
+}
+
+static int test_comparison_validation(void)
+{
+    Graph graph;
+    PathResult a, d;
+    REQUIRE(load_coordinate_fixture(&graph));
+    a = astar_shortest_path(&graph, 0, 3); d = dijkstra_shortest_path(&graph, 0, 3);
+    REQUIRE(path_results_agree(&graph, &a, &d, 0, 3));
+    ++a.distance;
+    REQUIRE(!path_results_agree(&graph, &a, &d, 0, 3));
+    a = d; a.path[1] = 4;
+    REQUIRE(!path_results_agree(&graph, &a, &d, 0, 3));
+    a = d; a.found = 0;
+    REQUIRE(!path_results_agree(&graph, &a, &d, 0, 3));
+    return 1;
+}
+
+static int test_different_equal_paths(void)
+{
+    Graph graph;
+    PathResult a, d;
+    graph_init(&graph);
+    for (int i = 0; i < 4; ++i) {
+        REQUIRE(graph_add_location(&graph, i + 1, "Node", "Type"));
+        graph.locations[i].has_coordinates = 1;
+    }
+    REQUIRE(graph_add_road(&graph, 1, 2, 1)); REQUIRE(graph_add_road(&graph, 2, 4, 3));
+    REQUIRE(graph_add_road(&graph, 1, 3, 2)); REQUIRE(graph_add_road(&graph, 3, 4, 2));
+    graph.locations[0].x = 0; graph.locations[1].x = -1;
+    graph.locations[2].x = 2; graph.locations[3].x = 2;
+    d = dijkstra_shortest_path(&graph, 0, 3); a = astar_shortest_path(&graph, 0, 3);
+    REQUIRE(d.distance == 4 && a.distance == 4 && d.path[1] != a.path[1]);
+    REQUIRE(path_results_agree(&graph, &a, &d, 0, 3));
+    return 1;
+}
+
+static int test_many_graphs_reference(void)
+{
+    Graph graph;
+    int reference[12][12], i, j, k, seed;
+    for (seed = 1; seed <= 20; ++seed) {
+        graph_init(&graph);
+        for (i = 0; i < 12; ++i) {
+            REQUIRE(graph_add_location(&graph, i + 1, "Node", "Type"));
+            graph.locations[i].x = (i * 7919 + seed * 3571) % 2000001 - 1000000;
+            graph.locations[i].y = (i * i * 101 + seed * 2131) % 2000001 - 1000000;
+            graph.locations[i].has_coordinates = 1;
+        }
+        for (i = 0; i < 11; ++i) for (j = i + 1; j < 11; ++j)
+            if ((i * 13 + j * 7 + seed) % 4 != 0)
+                REQUIRE(graph_add_road(&graph, i + 1, j + 1, (i * 31 + j * 17 + seed * 23) % 100 + 1));
+        for (i = 0; i < 12; ++i) for (j = 0; j < 12; ++j) reference[i][j] = graph.adjacency[i][j];
+        for (k = 0; k < 12; ++k) for (i = 0; i < 12; ++i) for (j = 0; j < 12; ++j)
+            if (reference[i][k] < INF_DISTANCE && reference[k][j] < INF_DISTANCE &&
+                reference[i][k] + reference[k][j] < reference[i][j])
+                reference[i][j] = reference[i][k] + reference[k][j];
+        for (j = 0; j < 12; ++j) {
+            double h[MAX_LOCATIONS];
+            (void)build_goal_heuristic(&graph, j, h);
+            for (i = 0; i < 12; ++i) {
+                PathResult a = astar_shortest_path(&graph, i, j), d = dijkstra_shortest_path(&graph, i, j);
+                REQUIRE(a.distance == reference[i][j] && d.distance == reference[i][j]);
+                REQUIRE(path_results_agree(&graph, &a, &d, i, j));
+                if (a.found) {
+                    REQUIRE(valid_path(&graph, a, i, j) && valid_path(&graph, d, i, j));
+                    REQUIRE(h[i] <= reference[i][j]);
+                }
+            }
+        }
+    }
+    return 1;
+}
+
+static int test_astar_large_chain(void)
+{
+    Graph graph;
+    PathResult a;
+    graph_init(&graph);
+    for (int i = 0; i < MAX_LOCATIONS; ++i) {
+        REQUIRE(graph_add_location(&graph, i + 1, "Node", "Type"));
+        graph.locations[i].has_coordinates = 1;
+        graph.locations[i].x = i * 40000 - 1000000;
+        if (i > 0) REQUIRE(graph_add_road(&graph, i, i + 1, MAX_ROAD_DISTANCE));
+    }
+    a = astar_shortest_path(&graph, 0, MAX_LOCATIONS - 1);
+    REQUIRE(a.distance == (MAX_LOCATIONS - 1) * MAX_ROAD_DISTANCE && a.path_length == MAX_LOCATIONS);
+    REQUIRE(valid_path(&graph, a, 0, MAX_LOCATIONS - 1));
+    return 1;
+}
+
+static int test_repeated_queries(void)
+{
+    Graph graph, original;
+    PathResult first, second;
+    REQUIRE(load_coordinate_fixture(&graph));
+    original = graph;
+    first = astar_shortest_path(&graph, 0, 3);
+    (void)astar_shortest_path(&graph, 3, 0);
+    (void)dijkstra_shortest_path(&graph, 0, 4);
+    second = astar_shortest_path(&graph, 0, 3);
+    REQUIRE(first.distance == second.distance && first.expanded_nodes == second.expanded_nodes &&
+            first.relaxed_edges == second.relaxed_edges && memcmp(first.path, second.path, sizeof first.path) == 0);
+    REQUIRE(memcmp(&graph, &original, sizeof graph) == 0);
+    return 1;
+}
+
+static int test_campus_reference(void)
+{
+    Graph graph;
+    int reference[MAX_LOCATIONS][MAX_LOCATIONS], i, j, k;
+    char path[1024];
+    graph_init(&graph);
+    (void)snprintf(path, sizeof path, "%s/../../data/locations.csv", fixtures);
+    REQUIRE(load_locations(&graph, path));
+    (void)snprintf(path, sizeof path, "%s/../../data/roads.csv", fixtures);
+    REQUIRE(load_roads(&graph, path));
+    (void)snprintf(path, sizeof path, "%s/../../data/coordinates.csv", fixtures);
+    REQUIRE(load_coordinates(&graph, path));
+    REQUIRE(graph.count == 12 && graph_has_complete_coordinates(&graph));
+    for (i = 0; i < graph.count; ++i) for (j = 0; j < graph.count; ++j) reference[i][j] = graph.adjacency[i][j];
+    for (k = 0; k < graph.count; ++k) for (i = 0; i < graph.count; ++i) for (j = 0; j < graph.count; ++j)
+        if (reference[i][k] < INF_DISTANCE && reference[k][j] < INF_DISTANCE &&
+            reference[i][k] + reference[k][j] < reference[i][j]) reference[i][j] = reference[i][k] + reference[k][j];
+    for (i = 0; i < graph.count; ++i) for (j = 0; j < graph.count; ++j) {
+        PathResult a = astar_shortest_path(&graph, i, j), d = dijkstra_shortest_path(&graph, i, j);
+        REQUIRE(a.distance == reference[i][j] && d.distance == reference[i][j]);
+        REQUIRE(valid_path(&graph, a, i, j) && valid_path(&graph, d, i, j));
+    }
+    return 1;
+}
+
+static int test_no_geometric_edges(void)
+{
+    Graph graph;
+    double h[MAX_LOCATIONS];
+    PathResult a;
+    graph_init(&graph);
+    REQUIRE(graph_add_location(&graph, 1, "Isolated", "Type"));
+    graph.locations[0].has_coordinates = 1;
+    REQUIRE(graph_heuristic_scale(&graph) == 0.0);
+    REQUIRE(build_goal_heuristic(&graph, 0, h) == 0.0 && h[0] == 0.0);
+    a = astar_shortest_path(&graph, 0, 0);
+    REQUIRE(a.found && a.distance == 0 && a.expanded_nodes == 1);
     return 1;
 }
 
@@ -434,6 +830,32 @@ int main(int argc, char *argv[])
     run_test("invalid text fields", test_bad_labels);
     run_test("missing files", test_missing_files);
     run_test("all pairs versus independent reference", test_reference_all_pairs);
+    run_test("load complete coordinates", test_coordinates);
+    run_test("negative coordinates", test_negative_coordinates);
+    run_test("unknown coordinate ID", test_unknown_coordinate);
+    run_test("duplicate coordinate keeps first", test_duplicate_coordinate);
+    run_test("coordinate field count", test_coordinate_fields);
+    run_test("coordinate integer and range validation", test_coordinate_range);
+    run_test("coordinate BOM and whitespace", test_coordinate_bom);
+    run_test("missing coordinates rejected by A star only", test_missing_coordinates);
+    run_test("Euclidean distance and large coordinates", test_euclidean);
+    run_test("goal zero and nonnegative heuristics", test_heuristic_goal);
+    run_test("scaled edge bounds and heuristic consistency", test_scaled_edges);
+    run_test("zero scale degenerates to Dijkstra", test_zero_scale);
+    run_test("A star direct path", test_astar_direct);
+    run_test("A star multi-step path", test_astar_multistep);
+    run_test("A star same endpoint and metrics", test_astar_same);
+    run_test("A star unreachable", test_astar_unreachable);
+    run_test("A star invalid indices null and empty graph", test_astar_invalid);
+    run_test("successful relaxations and expansion metrics", test_search_metrics);
+    run_test("decoy graph strictly fewer expansions", test_decoy);
+    run_test("comparison rejects invalid results", test_comparison_validation);
+    run_test("different equal-cost routes accepted", test_different_equal_paths);
+    run_test("20 graphs all pairs and admissibility versus Floyd", test_many_graphs_reference);
+    run_test("A star maximum-distance 50-vertex chain", test_astar_large_chain);
+    run_test("queries independent and graph immutable", test_repeated_queries);
+    run_test("campus all pairs versus Floyd", test_campus_reference);
+    run_test("no geometric edges use zero heuristic", test_no_geometric_edges);
     (void)remove("route-test-generated.csv");
     printf("\n%d tests passed, %d tests failed.\n", passed, failed);
     return failed ? 1 : 0;
