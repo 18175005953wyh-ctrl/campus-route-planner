@@ -6,8 +6,11 @@ set(CMAKE_C_STANDARD_REQUIRED ON)
 set(CMAKE_C_EXTENSIONS OFF)
 option(STRICT_WARNINGS "Treat compiler warnings as errors" OFF)
 
-add_library(route_core src/graph.c src/pathfinder.c src/input.c)
+add_library(route_core src/graph.c src/pathfinder.c src/input.c src/geometry.c)
 target_include_directories(route_core PUBLIC include)
+if(NOT MSVC)
+    target_link_libraries(route_core PUBLIC m)
+endif()
 add_executable(campus_route_planner src/main.c)
 target_link_libraries(campus_route_planner PRIVATE route_core)
 

@@ -1,0 +1,35 @@
+Loaded 6 locations.
+
+===== Campus Route Planner =====
+1. List all locations
+2. Show direct roads
+3. Find shortest route
+4. Search location
+5. Show map summary
+0. Exit
+Select an option: Start location ID: Destination location ID:
+Algorithm comparison
+Dijkstra route:
+Shortest route:
+Start -> Midpoint -> Goal
+
+Total distance: 20 m
+Dijkstra: distance=20 m, expanded=6, relaxed=5
+A* route:
+Shortest route:
+Start -> Midpoint -> Goal
+
+Total distance: 20 m
+A*: distance=20 m, expanded=3, relaxed=3
+Heuristic scale: 0.999999999999
+Distance agreement: yes
+Path validity: yes
+
+===== Campus Route Planner =====
+1. List all locations
+2. Show direct roads
+3. Find shortest route
+4. Search location
+5. Show map summary
+0. Exit
+Select an option: Goodbye.

@@ -1,6 +1,6 @@
 # Campus Route Planner — 校园路径规划器
 
-使用 C11、邻接矩阵和 Dijkstra 算法实现的命令行校园路径规划工具，输出完整路线和总距离。
+使用 C11、邻接矩阵、Dijkstra 和 A* 算法实现的命令行校园路径规划工具，输出完整路线、总距离及搜索指标对照。
 
 ## 项目背景与选择原因
 
@@ -8,7 +8,7 @@
 
 本项目把环境设计与数据结构学习结合起来：以一个虚构的校园为例，将空间关系录入文件，用程序回答“从某个地点到另一个地点，怎样走总距离更短”。它是算法练习与作品展示项目，示例距离不是实地测量数据，也不是实际导航服务。
 
-该工具独立放在仓库的 `campus-route-planner/` 中，与原有两个项目并列。以下构建命令都从本子目录执行，除非特别标明。
+这是独立的 `campus-route-planner` 仓库。以下构建命令均从包含 `CMakeLists.txt` 的仓库根目录执行。
 
 ## 主要功能
 
@@ -21,12 +21,13 @@
 - 从 CSV 自动读取地图，对错误行输出带行号的警告并跳过。
 - 校验空输入、非法整数、过长输入和不存在的编号；输入结束时正常退出。
 - 支持 `--data` 显式指定地图目录，以及构建后随可执行文件附带示例数据。
+- 支持 `--algorithm dijkstra|astar|compare`，默认 Dijkstra；A* 使用可选示意坐标文件和缩放欧氏启发函数。
 
 ## 数据结构与算法
 
 | 图概念 | 在程序中的对应关系 |
 | --- | --- |
-| 顶点 | 一个 `Location`，包含正整数编号、名称和类型 |
+| 顶点 | 一个 `Location`，包含正整数编号、名称、类型和可选示意坐标 |
 | 边 | 两个地点间的一条双向道路 |
 | 权重 | 道路长度，正整数，单位米 |
 | 邻接矩阵 | `Graph.adjacency[i][j]`，下标对应地点数组的位置 |
@@ -56,14 +57,17 @@ campus-route-planner/
 ├── src/
 │   ├── main.c                # 菜单、命令行参数和运行流程
 │   ├── graph.c               # 图、CSV、显示、搜索和摘要
-│   ├── pathfinder.c          # Dijkstra、路径回溯和路线输出
+│   ├── pathfinder.c          # Dijkstra/A*、共享回溯和路径验证
+│   ├── geometry.c            # 欧氏距离、缩放系数与启发函数
 │   └── input.c               # 行输入和整数解析
 ├── include/
 │   ├── graph.h
 │   ├── pathfinder.h
+│   ├── geometry.h
 │   └── input.h
 ├── data/
 │   ├── locations.csv
+│   ├── coordinates.csv       # 可选示意坐标，A*/compare 模式必须完整
 │   └── roads.csv
 ├── tests/
 │   ├── test_runner.c         # 独立 C 核心测试程序
@@ -75,6 +79,7 @@ campus-route-planner/
 ├── screenshots/
 │   └── .gitkeep
 ├── CMakeLists.txt
+├── .github/workflows/tests.yml
 ├── .gitignore
 ├── LICENSE
 └── README.md
@@ -135,14 +140,14 @@ Main Gate --200 m--> Central Square --180 m--> Library
 
 **打开文件夹方式：**
 
-1. 选择“打开本地文件夹”，打开本项目的 `campus-route-planner` 子目录，注意不是整个父仓库。
+1. 选择“打开本地文件夹”，打开包含 `CMakeLists.txt` 的 `campus-route-planner` 仓库目录。
 2. 等待 CMake 配置完成，选择 `x64-Debug`。
 3. 在启动项中选择 **`campus_route_planner.exe`**，不要选测试程序 `route_tests.exe`。
 4. 按 Ctrl+F5 编译运行，出现英文菜单后输入数字。
 
 CMake 构建后会把示例 `data` 复制到可执行文件旁边。更新原始 CSV 后，如果没有触发可执行文件重新链接，可以执行“重新生成”，或运行时使用 `--data` 指向原始数据目录。
 
-**生成解决方案方式：**在 Developer PowerShell for VS 2022 中进入本子目录，执行：
+**生成解决方案方式：**在 Developer PowerShell for VS 2022 中进入仓库根目录，执行：
 
 ```powershell
 cmake -S . -B build -G "Visual Studio 17 2022" -A x64 -DSTRICT_WARNINGS=ON
@@ -157,7 +162,7 @@ ctest --test-dir build -C Debug --output-on-failure
 
 要求 CMake 3.20+ 和支持 C11 的编译器。MSVC 使用 `/W4`；GCC/Clang 使用 `-Wall -Wextra -Wpedantic`。启用 `STRICT_WARNINGS` 会将警告视为错误。
 
-Linux/macOS 中，进入本项目子目录后执行：
+Linux/macOS 中，进入仓库根目录后执行：
 
 ```sh
 cmake -S . -B build -DCMAKE_BUILD_TYPE=Debug -DSTRICT_WARNINGS=ON
@@ -232,9 +237,9 @@ Most connected location(s):
 
 输入 `0` 退出，不会修改任何地图数据。
 
-## 自动化测试与实际结果
+## 原版自动化测试与回归基线
 
-CTest 包含两个测试组：
+原版基线提交 `ef6c557051e56f96bd0f4f89345a58fdada84d19` 包含两个测试组；2026-10-11 升级前重新验证全部通过：
 
 - `core_tests`：独立的 `tests/test_runner.c`，共 29 项测试。
 - `cli_tests`：CMake 驱动主程序的 11 个真实子进程场景，不依赖 Python 或第三方测试框架。
@@ -270,13 +275,13 @@ Visual Studio 多配置构建则使用：
 
 ## 截图位置
 
-`screenshots/.gitkeep` 用于保留目录，目前未添加截图。可运行后保存 `shortest-route.png`、`map-summary.png` 和 `tests.png`，再把实际截图加入 README。这里的终端文本是实际输出的摘录，不是截图。
+`screenshots/` 已有原版菜单及路线截图。A* 升级可补充 `astar-comparison.png`（校园对照）、`astar-decoy.png`（诱导支路）、`astar-tests.png`（本地测试）和 `astar-ci.png`（远程双平台检查）。这里的终端文本是实际输出摘录，不是截图；不要将本地测试截图当作远程 CI 成功证明。
 
 ## 当前限制与改进方向
 
 当前最多 50 个地点，只支持双向、正整数权重道路；地图只读，无编辑和保存功能。不支持带逗号的名称或通用 CSV 引号规则，不处理实时路况、通行时间或实际地理坐标。默认数据路径发现依赖工作目录或启动命令提供的程序路径，复杂启动环境建议使用 `--data`。
 
-邻接矩阵适合这一规模的学习示例，但对大量稀疏地点会浪费空间。后续可以改用邻接表、加入带合理启发函数的 A*、区分步行和骑行道路、支持临时封路和无障碍路线，再考虑真实地图或 Web 界面。以上均为计划，不属于当前功能。
+邻接矩阵适合这一规模的学习示例，但对大量稀疏地点会浪费空间。A* 已实现；邻接表、区分步行和骑行道路、临时封路、无障碍路线、真实地图和 Web 界面仍未实现。
 
 ## 我通过项目练习到的能力
 
@@ -289,4 +294,142 @@ Visual Studio 多配置构建则使用：
 
 阅读建议：先读 `include/graph.h` 理解数据，再读 `src/pathfinder.c` 理解算法，最后读 `src/main.c` 理解整个流程。
 
-本子项目使用 [MIT License](LICENSE)，不改变仓库其他项目的许可状态。
+本项目使用 [MIT License](LICENSE)。
+
+## A* Route Search
+
+### Difference from Dijkstra
+
+Dijkstra 选择 `g(n)` 最小的未关闭节点；A* 选择 `f(n) = g(n) + h(n)` 最小的节点。
+两者共用邻接矩阵、O(V²)选点循环、整数距离松弛与路径回溯，搜索数组每次查询重新初始化。
+相同优先级按地点输入顺序选择。等长最短路线可以不同，compare 检查 found、总距离和各条路径合法性，不要求节点序列相同。
+内部一致性检查失败会输出错误并以非零状态退出。
+
+### Schematic Coordinates
+
+`data/coordinates.csv` 无表头，每行是 `location_id,x,y`。地点编号必须已存在，坐标为 `[-1000000,1000000]` 的整数。
+这是算法实验的**示意坐标，不是真实 GIS、经纬度或测绘数据**，不改变原有道路权重。
+原来的 `locations.csv`、`roads.csv` 均保持三列不变。
+
+未知 ID、重复坐标、缺字段、额外字段、非法整数、超范围数据均按行警告并跳过；重复坐标保留第一条有效记录。
+默认 Dijkstra 完全不读取坐标文件。A*/compare 必须能读取坐标文件，且每个已加载地点都有坐标，否则在进入菜单前失败。
+空地图搭配空坐标文件允许进入菜单，但没有可查询的地点。
+
+### Scaled Euclidean Heuristic
+
+设 `d(u,v)` 为示意坐标欧氏距离，`w(u,v)` 为整数道路权重：
+
+```text
+alpha = min(w(u,v) / d(u,v))，只考虑存在且 d(u,v)>0 的道路
+h(n) = alpha * d(n,goal)
+```
+
+没有几何长度大于零的道路时取 `alpha=0`；终端会说明 A* 退化为 Dijkstra。
+计算坐标差前先转 double，实际路径距离仍累加整数道路权重。
+每次查询开始时计算一次 alpha 和所有节点的 h，扩展循环内不重新扫描道路计算 alpha。
+
+为处理 double 舍入，实现将理论 alpha 乘以 `(1-1e-12)` 留出微小余量，再检查每条边的启发一致性。
+如果数值检查不满足，则本次查询全部使用零启发；显示的 `Heuristic scale` 是本次实际采用的系数。
+
+### Why the Heuristic Is Admissible
+
+由 alpha 的定义，对每条边都有 `alpha*d(u,v) <= w(u,v)`。
+由三角不等式：
+
+```text
+h(u) = alpha*d(u,goal)
+     <= alpha*d(u,v) + alpha*d(v,goal)
+     <= w(u,v) + h(v)
+```
+
+这就是一致性。沿任意通往终点的路径累加，结合 `h(goal)=0`，得到 `h(u)` 不超过路径总权重，因此也不超过最短路径长度。
+一致启发函数下，关闭节点后无需重新打开；缩小 alpha 或使用零启发也保留上述性质。
+
+### Algorithm Comparison
+
+指标口径：`expanded` 为选中并关闭的节点数，**包括起点和终点**；`relaxed` 只统计成功降低邻居 g 的次数，同一节点可以被成功松弛多次。
+起终点相同时是 expanded=1、relaxed=0。
+两种算法用同图、同起终点、同数据结构及独立的初始搜索状态，不统计毫秒“加速比”。
+
+### Reproduction Steps
+
+在 VS 2022 的开发者 PowerShell 中，从仓库根目录执行（NMake 单配置）：
+
+```powershell
+cmake -S . -B build-astar -G "NMake Makefiles" -DCMAKE_BUILD_TYPE=Debug -DSTRICT_WARNINGS=ON
+cmake --build build-astar
+ctest --test-dir build-astar -C Debug --output-on-failure -V
+.\build-astar\campus_route_planner.exe --data data --algorithm compare
+```
+
+依次输入 `3`、`1`、`2`，每次按回车，查询校门到图书馆。再输入 `3`、`1`、`8` 查询运动场，或 `3`、`5`、`11` 查询实验室到公交站，最后 `0` 退出。
+`--algorithm astar --data data` 的参数顺序也有效。算法值只接受小写；重复参数、缺值、未知参数均返回非零；`--help` 只能单独使用。
+只运行原版行为可用 `--algorithm dijkstra` 或不传该参数，菜单和查询输入顺序不变。
+
+诱导支路实验（同一个 PowerShell）：
+
+```powershell
+New-Item -ItemType Directory -Force build-astar/decoy | Out-Null
+Copy-Item tests/fixtures/astar_decoy_locations.csv build-astar/decoy/locations.csv
+Copy-Item tests/fixtures/astar_decoy_roads.csv build-astar/decoy/roads.csv
+Copy-Item tests/fixtures/astar_decoy_coordinates.csv build-astar/decoy/coordinates.csv
+.\build-astar\campus_route_planner.exe --data build-astar/decoy --algorithm compare
+```
+
+依次输入 `3`、`1`、`3`、`0`。所有副本在忽略的构建目录中，原始校园数据不变。
+Visual Studio 多配置构建的程序路径为 `build/Debug/campus_route_planner.exe`；Linux 使用 `./build/campus_route_planner`。
+
+### Actual Results
+
+2026-10-11 在代码提交 **`11bec7a688744fff4bf5a48129f63207df0e2b0d`** 上实际运行，Windows x64、MSVC 19.44、NMake Debug、严格警告 `/W4 /WX`。
+后续文档提交不改变这组代码和输入；可检出该提交复现。
+
+| Route | Algorithm | Distance (m) | Expanded | Relaxed |
+|---|---|---:|---:|---:|
+| Main Gate → Library (1→2) | Dijkstra | 380 | 6 | 11 |
+| Main Gate → Library (1→2) | A* | 380 | 4 | 9 |
+| Main Gate → Sports Field (1→8) | Dijkstra | 600 | 12 | 13 |
+| Main Gate → Sports Field (1→8) | A* | 600 | 9 | 12 |
+| Laboratory → Bus Stop (5→11) | Dijkstra | 350 | 5 | 7 |
+| Laboratory → Bus Stop (5→11) | A* | 350 | 4 | 5 |
+| Decoy: Start → Goal (1→3) | Dijkstra | 20 | 6 | 5 |
+| Decoy: Start → Goal (1→3) | A* | 20 | 3 | 3 |
+
+校园实际 scale 为 `0.459619407771`。校门到图书馆两者路线均为 `Main Gate -> Central Square -> Library`。
+诱导支路图实际 scale 为 `0.999999999999`，两者路线都是 `Start -> Midpoint -> Goal`。
+该图西侧三条支路的早期 g 分别为 1、2、3，Dijkstra 会先展开它们；A* 中这些节点的 f 大于主路径的约 20，因此能跳过它们。
+校园的缩放值由道路权重约束，不能为了展示更多减少量而随意增大。
+
+实测终端摘录：
+
+```text
+Dijkstra: distance=380 m, expanded=6, relaxed=11
+A*: distance=380 m, expanded=4, relaxed=9
+Heuristic scale: 0.459619407771
+Distance agreement: yes
+Path validity: yes
+```
+
+### Tests and Cross-validation
+
+同一提交本地实际输出：
+
+```text
+55 tests passed, 0 tests failed.
+38 CLI cases passed
+100% tests passed, 0 tests failed out of 2
+```
+
+共 **93 项检查**（原有40项全部保留，新增53项），CTest 将它们包装成2组；不是“只有2项测试”。
+核心覆盖坐标格式与边界、启发函数一致性与非负性、零启发退化、直达/多段/孤立/相同起终点、错误索引、最大距离50点路径、指标统计、不同等长路线、损坏结果检测及独立重复查询。
+独立 Floyd–Warshall 校验原8点图64对、校园12点图144对、20张固定生成12点图2880对，两种算法均核对距离和各自路径。
+CLI 另外对校园144对连续查询，检查所有结果一致；还覆盖两种参数顺序、非法参数、缺失/不完整坐标、无坐标时默认Dijkstra、可执行文件旁查找数据、路径空格和旧菜单回归。
+
+GitHub Actions 配置位于 `.github/workflows/tests.yml`，工作流名 **Campus Route Planner tests**，推送及 PR 会分别在 `ubuntu-latest`、`windows-latest` 上严格构建并运行 CTest。
+**远程 CI 尚未确认**：此处只记录上述本地验证，不能视为 Linux 或 GitHub Actions 已通过。发布后以最新提交的两个远程任务真实结果为准。
+
+### Limitations
+
+最多50个地点，邻接矩阵和线性选点保持 O(V²) 时间、O(V²) 图空间；启发函数准备也是 O(V²)，因此节点少展开不等于运行时间同比减少。
+坐标只是示意数据；alpha=0、坐标区分度弱或大量等价路线时不保证减少节点。
+不包含堆、邻接表、实时路况、动态封路或真实导航；比较只改变节点优先级，不混入其他优化。
